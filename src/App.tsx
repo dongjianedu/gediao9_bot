@@ -1,8 +1,10 @@
 import {RequestDetails} from 'deep-chat/dist/types/interceptors';
 import {DeepChat} from 'deep-chat-react';
+import {useRef} from 'react';
 import './App.css';
 
 function App() {
+  const chatRef = useRef<any>(null);
   return (
     <div className="App">
       <h1 id="page-title">
@@ -13,6 +15,7 @@ function App() {
       <div className="components">
         <div className="diagonal-line" style={{background: '#e8f5ff'}}></div>
         <DeepChat
+          ref={chatRef}
           style={{borderRadius: '10px'}}
           introMessage={{text: '你好！我是 AI 助手，有什么可以帮你的？'}}
           connect={{
@@ -22,7 +25,7 @@ function App() {
                 role: msg.role || 'user',
                 content: msg.text ?? msg.content ?? ''
               }));
-              
+
               const res = await fetch('/api/v1/chat/completions', {
                 method: 'POST',
                 headers: {
@@ -46,19 +49,20 @@ function App() {
               let buffer = '';
 
               signals.onOpen();
+              console.log('[stream] opened');
               try {
                 while (true) {
                   const { done, value } = await reader.read();
-                  if (done) break;
-                  
+                  if (done) { console.log('[stream] read done'); break; }
+
                   buffer += decoder.decode(value, { stream: true });
                   const lines = buffer.split('\n');
                   buffer = lines.pop() || '';
-                  
+
                   for (const line of lines) {
                     if (line.startsWith('data: ')) {
                       const data = line.slice(6).trim();
-                      if (data === '[DONE]') continue;
+                      if (data === '[DONE]') { console.log('[stream] received [DONE]'); continue; }
                       try {
                         const json = JSON.parse(data);
                         const delta = json.choices?.[0]?.delta?.content;
@@ -72,11 +76,27 @@ function App() {
                     }
                   }
                 }
+                console.log('[stream] loop ended, fullText length:', fullText.length);
               } catch (e) {
                 console.error('Stream read error:', e);
                 signals.onResponse({ error: 'Stream read failed' });
               } finally {
+                console.log('[stream] closing');
                 signals.onClose();
+                if (fullText) {
+                  console.log('[stream] adding suggestion via addMessage');
+                  setTimeout(() => {
+                    chatRef.current?.addMessage({
+                      role: 'ai',
+                      html: `<div style="display:flex;flex-direction:column;gap:4px;margin-top:4px">
+        <button class="deep-chat-button deep-chat-suggestion-button" style="font-size:0.85em;text-align:left">再详细解释一下？</button>
+        <button class="deep-chat-button deep-chat-suggestion-button" style="font-size:0.85em;text-align:left">举个实际例子？</button>
+        <button class="deep-chat-button deep-chat-suggestion-button" style="font-size:0.85em;text-align:left">还有其他方案吗？</button>
+      </div>`,
+                    });
+                    console.log('[stream] suggestion added via addMessage');
+                  }, 100);
+                }
               }
             },
           }}
